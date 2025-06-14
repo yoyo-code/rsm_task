@@ -17,3 +17,4 @@ PyMuPDF
 beautifulsoup4
 pillow
 aiohttp
+langfuse

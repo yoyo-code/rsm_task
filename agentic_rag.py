@@ -6,8 +6,19 @@ from typing import Literal
 from config import settings
 import logging
 import re
+from langfuse import Langfuse
+from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger(__name__)
+
+langfuse = Langfuse(
+    public_key=settings.langfuse_public_key,
+    secret_key=settings.langfuse_secret_key,
+    host=settings.langfuse_host
+)
+
+# Crear el CallbackHandler de Langfuse
+langfuse_handler = CallbackHandler()
 
 # Variables globales para los modelos
 response_model = None
@@ -33,8 +44,8 @@ def custom_retriever_function(vector_store_manager):
     def _retrieve(query: str) -> str:
         """Recuperar documentos y formatear con metadatos"""
         try:
-            # Obtener retriever base
-            retriever = vector_store_manager.get_retriever(k=5)
+            # Obtener retriever base - CAMBIO: pasar k como search_kwargs para obtener 20 documentos
+            retriever = vector_store_manager.get_retriever(search_kwargs={'k': 10})
             # Recuperar documentos con metadatos
             documents = retriever.invoke(query)
             # Formatear respuesta incluyendo metadatos
@@ -59,7 +70,14 @@ def setup_retriever_tool(vector_store_manager):
         from langchain_core.tools import tool
         @tool
         def retrieve_document_content(query: str) -> str:
-            """Search and return information from the uploaded document. Use this tool to answer questions about specific content, names, data, or details mentioned in the document."""
+            """
+                Semantic search and return information from Think Python and PEP-8.
+                Use this tool to answer questions about specific content, names, data, or details mentioned in the document.
+            Args:
+                query (str): The question or phrase to search in the document, not use only 1 word use a complete sentence in english.
+            Returns:
+                str: The content retrieved from the document, formatted with metadata.
+            """
             return custom_retriever(query)
         retriever_tool = retrieve_document_content
         return retriever_tool
@@ -69,34 +87,69 @@ def setup_retriever_tool(vector_store_manager):
 
 # Prompts 
 GRADE_PROMPT = (
-    "You are a grader assessing relevance of a retrieved document to a user question. \n "
-    "Here is the retrieved document: \n\n {context} \n\n"
-    "Here is the user question: {question} \n"
-    "If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n"
-    "Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."
+    "You are a grader assessing how relevant a retrieved document is to a user question.\n\n"
+    "Document: {context}\n"
+    "------------------------------------------\n\n"
+    "Question: {question}\n"
+    "------------------------------------------\n\n"
+    "Score the document’s relevance using **only** one of the following labels:\n"
+    "  • **yes**      – the document directly answers the question or contains clear, specific keywords/ideas required.\n"
+    "  • **partial**  – the document is on–topic but does not fully answer the question (e.g., high-level mention, missing details).\n"
+    "  • **no**       – the document is unrelated or purely background noise.\n\n"
+    "Return exactly the label (yes / partial / no) with no extra text.\n\n"
+    "💡 **Examples**\n"
+    "Q:  How do I reverse a list in-place in Python?\n"
+    "D:  “… you can call list.reverse() which mutates the list …”   →  **yes**\n"
+    "Q:  Same question …\n"
+    "D:  “… slicing syntax like list[::-1] creates a copy …”        →  **partial**\n"
+    "Q:  Same question …\n"
+    "D:  “… SQL JOINs combine rows from two tables …”               →  **no**"
 )
 
 REWRITE_PROMPT = (
-    "Look at the input and try to reason about the underlying semantic intent / meaning.\n"
-    "Here is the initial question:"
-    "\n ------- \n"
-    "{question}"
-    "\n ------- \n"
-    "Formulate an improved question:"
+    "You are an expert search-query engineer.\n"
+    "Your job: transform the user’s natural-language question into ONE concise, high-recall web-search query in English "
+    "(≤ 120 characters) that will surface the best technical resources.\n\n"
+    "Guidelines:\n"
+    "1. Strip filler words (the, a, de, para …).\n"
+    "2. Expand acronyms / include synonyms when helpful (e.g., “LRU cache” ➜ “LRU OR least recently used cache”).\n"
+    "3. Add filters/operators if obvious (site:docs.python.org, filetype:pdf, intitle:…).\n"
+    "4. Use AND (implicit) between key concepts; use OR for synonyms.\n"
+    "5. Return **only** the query string—no quotes, no JSON wrapper.\n\n"
+    "---------------- ORIGINAL QUESTION ----------------\n"
+    "{question}\n"
+    "---------------------------------------------------\n\n"
+    "Optimized query:"
+    "\n\n"
+    "💡 **Few-shot examples**\n"
+    "Input:  “¿Cómo entreno un transformer multilingüe en PyTorch?”\n"
+    "Output: train multilingual transformer model PyTorch tutorial fine-tuning\n\n"
+    "Input:  “¿Cuál es la diferencia entre lista y tupla en Python?”\n"
+    "Output: python list vs tuple mutability difference"
 )
 
 GENERATE_PROMPT = (
-    "You are an assistant for question-answering tasks with access to comprehensive Python programming resources. "
-    "You have access to:\n"
-    "- Think Python: A complete Python programming book covering fundamentals, data structures, algorithms, and programming concepts\n"
-    "- PEP-8: The official Python style guide with coding conventions and best practices\n"
-    "- Code examples, explanations, and programming concepts from beginner to advanced levels\n\n"
-    "Use the following retrieved context to answer the question. "
-    "You can provide code examples, explain programming concepts, discuss Python syntax, or give style recommendations based on the available content. "
-    "If the information needed to answer the question is not in the provided context, clearly state that you don't know. "
-    "Use three sentences maximum and keep the answer concise.\n\n"
-    "Question: {question}\n"
-    "Context: {context}"
+    "You are a Python Q&A assistant with access to authoritative resources, including:\n"
+    "  • *Think Python* (full book)\n"
+    "  • PEP-8 style guide\n"
+    "  • Curated code examples (beginner → advanced)\n\n"
+    "Use the retrieved **Context** below to answer the user’s question.  If the context is insufficient, reply with:\n"
+    "    “I don’t know based on the provided context.”\n\n"
+    "Constraints:\n"
+    "  • Maximum length: **3 sentences**.\n"
+    "  • Be precise; prefer a one-line code snippet over prose when helpful.\n"
+    "  • Follow PEP-8 in any code you output.\n\n"
+    "---------------- QUESTION ----------------\n"
+    "{question}\n"
+    "---------------- CONTEXT ----------------\n"
+    "{context}\n"
+    "-----------------------------------------\n\n"
+    "Answer:"
+    "\n\n"
+    "💡 **Mini-example inside the prompt (the model sees it)**\n"
+    "Q:  How do I reverse a list in-place?\n"
+    "Context:  “… call the list.reverse() method …”\n"
+    "A:  Call `my_list.reverse()` — it reverses the list in place and returns `None`."
 )
 
 class GradeDocuments(BaseModel):
@@ -150,7 +203,7 @@ def generate_answer(state: MessagesState):
     return {"messages": [response]}
 
 def build_graph():
-    """Construir el grafo exactamente como la documentación"""
+    """Construir el grafo exactamente como la documentación con Langfuse tracing"""
     workflow = StateGraph(MessagesState)
     workflow.add_node("generate_query_or_respond", generate_query_or_respond)
     workflow.add_node("retrieve", ToolNode([retriever_tool]))
@@ -171,7 +224,7 @@ def build_graph():
     )
     workflow.add_edge("generate_answer", END)
     workflow.add_edge("rewrite_question", "generate_query_or_respond")
-    graph = workflow.compile()
+    graph = workflow.compile().with_config({"callbacks": [langfuse_handler]})
     return graph
 
 async def process_query_with_graph(question: str, graph) -> dict:
@@ -215,7 +268,7 @@ def extract_sources_from_formatted_content(content: str) -> list:
         # Buscar bloques de documentos con patrón [DOCUMENTO_X|PAGE_Y|SOURCE_Z|CHUNK_W]
         document_pattern = r'\[DOCUMENTO_(\d+)\|PAGE_([^|]+)\|SOURCE_([^|]+)\|CHUNK_([^]]+)\]\n(.*?)(?=\[DOCUMENTO_|\Z)'
         matches = re.findall(document_pattern, content, re.DOTALL)
-        for match in matches[:5]:
+        for match in matches[:10]:
             doc_num, page_info, source_info, chunk_info, doc_content = match
             clean_content = doc_content.strip()
             source = {
@@ -238,7 +291,7 @@ def extract_sources_fallback(content: str) -> list:
         paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
         if not paragraphs:
             paragraphs = [p.strip() for p in content.split('\n') if p.strip()]
-        for i, paragraph in enumerate(paragraphs[:5]):
+        for i, paragraph in enumerate(paragraphs[:10]):
             if len(paragraph) > 20: 
                 sources.append({
                     "page": str(i + 1),  

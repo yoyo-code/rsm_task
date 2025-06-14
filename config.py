@@ -26,16 +26,9 @@ class Settings(BaseSettings):
     model_name: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-large"
     
-    # Configuración de archivos
-    upload_dir: str = "./uploads"
-    max_file_size: int = 10 * 1024 * 1024  # 10MB
-    
-    # Configuración del texto
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
-    
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 # Instancia global de configuración
 settings = Settings()
