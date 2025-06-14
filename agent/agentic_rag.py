@@ -3,7 +3,7 @@ from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, Field
 from typing import Literal
-from config import settings
+from core.config import settings
 import logging
 import re
 from langfuse import Langfuse
@@ -85,7 +85,6 @@ def setup_retriever_tool(vector_store_manager):
         logger.error(f"Error configurando retriever tool: {str(e)}")
         raise
 
-# Prompts 
 GRADE_PROMPT = (
     "You are a grader assessing how relevant a retrieved document is to a user question.\n\n"
     "Document: {context}\n"
@@ -315,6 +314,7 @@ class AgenticRAG:
         self.document_indexed = False
         initialize_models()
         self._check_existing_documents()
+    
     def _check_existing_documents(self):
         """Verificar si ya hay documentos indexados y configurar automáticamente"""
         try:
@@ -329,6 +329,7 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Error verificando documentos existentes: {str(e)}")
             logger.info("Continuando sin configuración automática")
+    
     def setup_retriever_tool(self):
         """Configurar herramienta de recuperación y construir grafo"""
         try:
@@ -338,6 +339,7 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Error configurando AgenticRAG: {str(e)}")
             raise
+    
     async def process_query(self, question: str) -> dict:
         """Procesar una consulta"""
         if not self.document_indexed:

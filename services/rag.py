@@ -1,7 +1,7 @@
-from models import QueryResponse, Source, IngestResponse
-from vector_store import VectorStoreManager
-from document_processor import DocumentProcessor
-from agentic_rag import AgenticRAG
+from models.schemas import QueryResponse, Source, IngestResponse
+from services.vector_store import VectorStoreManager
+from ingestion.pipeline import IngestionPipeline
+from agent.agentic_rag import AgenticRAG
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class RAGService:
         logger.info("Inicializando RAGService para procesamiento web...")
         
         self.vector_store_manager = VectorStoreManager()
-        self.document_processor = DocumentProcessor()
+        self.ingestion_pipeline = IngestionPipeline()
         self.agentic_rag = AgenticRAG(self.vector_store_manager)
         
         logger.info("RAG Service inicializado correctamente para web scraping")
@@ -25,7 +25,7 @@ class RAGService:
         try:
             # Procesar sitio web 
             logger.info("Paso 1: Scrapeando y procesando sitio web...")
-            documents, doc_ids = await self.document_processor.process_all_websites_async()
+            documents, doc_ids = await self.ingestion_pipeline.process_all_websites_async()
             logger.info(f"Sitio web procesado: {len(documents)} documentos creados")
             
             # Indexar en Qdrant

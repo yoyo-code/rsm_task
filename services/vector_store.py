@@ -1,9 +1,11 @@
 from langchain_qdrant import QdrantVectorStore
-from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
-from config import settings
+from core.config import settings
+from services.embeddings import EmbeddingService
+from langchain_core.documents import Document
 import logging
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -11,20 +13,16 @@ class VectorStoreManager:
     """Maneja las operaciones del vector store con Qdrant siguiendo exactamente la documentación"""
     
     def __init__(self):
-        self.embeddings = None
+        self.embedding_service = EmbeddingService()
+        self.embeddings = self.embedding_service.get_embeddings()
         self.client = None
         self.vector_store = None
         self.collection_name = settings.qdrant_collection_name
         self._initialize()
     
     def _initialize(self):
-        """Inicializar cliente de Qdrant y embeddings"""
+        """Inicializar cliente de Qdrant"""
         try:
-            # Inicializar embeddings de OpenAI
-            self.embeddings = OpenAIEmbeddings(
-                model=settings.embedding_model,
-                openai_api_key=settings.openai_api_key
-            )
             # Conectar a Qdrant según la documentación
             if settings.qdrant_use_grpc:
                 self.client = QdrantClient(
@@ -40,6 +38,7 @@ class VectorStoreManager:
 
             # Crear colección si no existe
             self._ensure_collection_exists()
+            logger.info("VectorStoreManager inicializado correctamente")
         except Exception as e:
             logger.error(f"Error inicializando vector store: {str(e)}")
             raise
@@ -57,6 +56,7 @@ class VectorStoreManager:
                         distance=Distance.COSINE
                     )
                 )
+                logger.info(f"Colección {self.collection_name} creada")
             else:
                 logger.info(f"Colección {self.collection_name} ya existe")
                 
@@ -64,12 +64,13 @@ class VectorStoreManager:
             logger.error(f"Error verificando/creando colección: {str(e)}")
             raise
     
-    def create_vectorstore_from_documents(self, documents, ids=None):
+    def create_vectorstore_from_documents(self, documents: List[Document], ids: Optional[List[str]] = None):
         """Crear vector store desde documentos usando el patrón exacto de la documentación"""
         try:
             # Limpiar colección existente
             try:
                 self.client.delete_collection(self.collection_name)
+                logger.info("Colección existente eliminada")
             except:
                 logger.info("No había colección previa que eliminar")
             
@@ -87,6 +88,7 @@ class VectorStoreManager:
             
             # Verificar que los documentos se indexaron correctamente
             count = self.client.count(collection_name=self.collection_name)
+            logger.info(f"Vector store creado con {count.count} documentos indexados")
             return self.vector_store
             
         except Exception as e:
@@ -141,7 +143,7 @@ class VectorStoreManager:
                 "status": "error"
             }
     
-    def test_similarity_search(self, query, k=3):
+    def test_similarity_search(self, query: str, k: int = 3):
         """Método de prueba para verificar que la búsqueda funciona"""
         try:
             if not self.vector_store:
