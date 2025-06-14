@@ -1,0 +1,44 @@
+#  Python artefacts
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+
+#  Entornos y dependencias locales
+myenv/
+.myenv/
+.myenv/
+pip-wheel-metadata/
+
+#  Archivos sensibles
+.env
+*.env
+*.secret
+secrets.yml
+
+#  Git y VCS
+.git/
+.gitignore
+
+#  Builds, logs y cachés
+build/
+dist/
+*.egg-info/
+*.log
+.cache/
+.pytest_cache/
+.coverage*
+htmlcov/
+
+#  Código de pruebas
+tests/
+
+#  Node / Frontend
+node_modules/
+
+#  IDE / Sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+

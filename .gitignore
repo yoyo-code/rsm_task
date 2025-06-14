@@ -1,0 +1,55 @@
+#  Python / FastAPI
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+#  Entornos virtuales
+myenv/
+.myenv/
+.myenv/
+
+#  Builds y wheel metadata
+build/
+dist/
+pip-wheel-metadata/
+*.egg-info/
+
+#  Archivos de configuración sensibles
+.env
+*.env
+*.secret
+secrets.yml
+
+#  Bases de datos locales
+*.db
+*.sqlite3
+
+#  Logs y profiling
+*.log
+logs/
+
+#  Tests y coberturas
+.pytest_cache/
+.coverage*
+htmlcov/
+
+#  Alembic (deja la carpeta, ignora versiones)
+alembic/versions/*
+
+#  Node / Frontend
+node_modules/
+
+#  IDE / Editor
+.idea/
+.vscode/
+*.sw?
+*.swo
+*.swn
+
+#  Sistema operativo
+.DS_Store
+Thumbs.db
+
+#  Generados de documentación (e.g. mkdocs)
+site/
