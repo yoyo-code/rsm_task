@@ -1,5 +1,7 @@
 # Backend
 fastapi
+uvicorn
+python-multipart
 
 # Config
 python-dotenv
@@ -11,3 +13,4 @@ langchain-text-splitters
 langchain-openai
 langchain-qdrant
 qdrant-client
+PyMuPDF

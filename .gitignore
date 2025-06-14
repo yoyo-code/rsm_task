@@ -53,3 +53,6 @@ Thumbs.db
 
 #  Generados de documentación (e.g. mkdocs)
 site/
+
+# docker-compose-dev
+docker-compose.dev.yaml
