@@ -1,108 +1,167 @@
-import fitz  # PyMuPDF
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import HTMLSemanticPreservingSplitter
 from config import settings
+from web_scraper import WebScraper
 import logging
 import os
 from uuid import uuid4
+from bs4 import Tag
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
-    """Procesa documentos PDF para el sistema RAG"""
+    """Procesa páginas web HTML para el sistema RAG usando HTMLSemanticPreservingSplitter SIMPLIFICADO"""
     
     def __init__(self):
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
+        # Configurar headers para fragmentación semántica
+        self.headers_to_split_on = [
+            ("h1", "Header 1"),
+            ("h2", "Header 2"),
+            ("h3", "Header 3"),
+            ("h4", "Header 4"),
+            ("h5", "Header 5"),
+            ("h6", "Header 6"),
+        ]
+        
+        # HTMLSemanticPreservingSplitter para fragmentación semántica sin chunk_size fijo
+        self.splitter = HTMLSemanticPreservingSplitter(
+            headers_to_split_on=self.headers_to_split_on,
+            separators=["\n\n", "\n", ". ", "! ", "? "],
+            # Sin max_chunk_size para permitir fragmentación puramente semántica
+            preserve_images=False,  # False porque usamos custom handler
+            preserve_videos=True,
+            elements_to_preserve=["table", "ul", "ol", "code", "pre", "blockquote"],
+            denylist_tags=["script", "style", "head", "nav", "footer", "aside"],
+            custom_handlers={"img": self._simple_image_handler},
         )
+        
+        self.web_scraper = WebScraper()
         
         # Asegurar que el directorio de uploads existe
         os.makedirs(settings.upload_dir, exist_ok=True)
     
-    def extract_pages_from_pdf(self, pdf_path: str) -> list[dict]:
-        """Extraer texto página por página manteniendo la información de página"""
+    def _simple_image_handler(self, img_tag: Tag) -> str:
+        """Handler simple para procesar imágenes sin LLM"""
         try:
-            doc = fitz.open(pdf_path)
-            pages = []
-            total_pages = len(doc)
+            img_src = img_tag.get("src", "")
+            img_alt = img_tag.get("alt", "No alt text provided")
             
-            for page_num in range(total_pages):
-                page = doc.load_page(page_num)
-                page_text = page.get_text()
-                pages.append({
-                    "page_number": page_num + 1,
-                    "text": page_text
-                })
+            # Si la imagen no tiene src, retornar solo el alt text
+            if not img_src:
+                return f"[Image: {img_alt}]"
             
-            doc.close()
+            # Convertir URL relativa a absoluta si es necesario
+            if img_src.startswith('/'):
+                img_src = f"https://allendowney.github.io{img_src}"
+            elif not img_src.startswith('http'):
+                img_src = f"https://allendowney.github.io/ThinkPython/{img_src}"
             
-            total_chars = sum(len(page["text"]) for page in pages)
-            logger.info(f"Texto extraído del PDF: {total_chars} caracteres, {total_pages} páginas")
-            
-            return pages
+            # Retornar formato simple sin análisis LLM
+            return f"[Image Alt Text: {img_alt} | Image Source: {img_src}]"
                 
         except Exception as e:
-            logger.error(f"Error extrayendo páginas del PDF: {str(e)}")
-            raise
+            logger.error(f"Error en simple image handler: {str(e)}")
+            return "[Image: Error processing image]"
     
-    def create_documents_from_pages(self, pages: list[dict], source: str = "document.pdf") -> list[Document]:
-        """Crear documentos de LangChain desde páginas, manteniendo la información correcta de página"""
+    def _process_single_page(self, html_content_and_url: tuple) -> list[Document]:
+        """Procesar una sola página HTML de forma simple"""
+        html_content, page_url = html_content_and_url
+        
         try:
-            documents = []
-            chunk_id = 0
+            logger.info(f"Procesando página: {page_url}")
             
-            for page_data in pages:
-                page_number = page_data["page_number"]
-                page_text = page_data["text"]
+            # Dividir HTML usando HTMLSemanticPreservingSplitter
+            page_documents = self.splitter.split_text(html_content)
+            
+            # Agregar metadata específico de la página
+            for i, doc in enumerate(page_documents):
+                # Mantener metadata existente y agregar info de página
+                doc.metadata.update({
+                    "source": page_url,
+                    "page": page_url,  # Usar URL como "page" según solicitado
+                    "page_title": self._extract_page_title(html_content)
+                })
+            
+            logger.info(f"Creados {len(page_documents)} chunks semánticos para {page_url}")
+            return page_documents
+            
+        except Exception as e:
+            logger.error(f"Error procesando página {page_url}: {str(e)}")
+            return []
+    
+    async def create_documents_from_html_pages_async(self, html_pages: list) -> list[Document]:
+        """Crear documentos con paralelización simple usando ThreadPoolExecutor"""
+        try:
+            all_documents = []
+            
+            logger.info(f"Iniciando procesamiento paralelo simplificado de {len(html_pages)} páginas...")
+            
+            # Usar ThreadPoolExecutor para procesar páginas en paralelo
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                # Enviar todas las tareas de procesamiento de páginas
+                futures = [
+                    executor.submit(self._process_single_page, page_data)
+                    for page_data in html_pages
+                ]
                 
-                # Dividir el texto de esta página específica en chunks
-                page_chunks = self.text_splitter.split_text(page_text)
-                
-                # Crear un documento para cada chunk de esta página
-                for chunk in page_chunks:
-                    if chunk.strip():  # Solo crear documento si el chunk tiene contenido
-                        doc = Document(
-                            page_content=chunk,
-                            metadata={
-                                "source": source,
-                                "chunk_id": chunk_id,
-                                "page": page_number
-                            }
-                        )
-                        documents.append(doc)
-                        chunk_id += 1
+                # Recoger resultados conforme se completan
+                for i, future in enumerate(futures):
+                    try:
+                        page_documents = future.result()
+                        if page_documents:
+                            all_documents.extend(page_documents)
+                        logger.info(f"Completada página {i+1}/{len(html_pages)}")
+                    except Exception as e:
+                        logger.error(f"Error procesando página {i+1}: {str(e)}")
+                        continue
             
-            # Agregar total_chunks a todos los documentos
-            for doc in documents:
-                doc.metadata["total_chunks"] = len(documents)
+            # Agregar chunk_id y total_chunks a todos los documentos
+            for i, doc in enumerate(all_documents):
+                doc.metadata.update({
+                    "chunk_id": i,
+                    "total_chunks": len(all_documents)
+                })
             
-            logger.info(f"Creados {len(documents)} documentos desde {len(pages)} páginas")
+            logger.info(f"Total documentos creados con paralelización simple: {len(all_documents)}")
             
-            # Log de verificación de chunks por página
+            # Log de verificación de páginas
             page_counts = {}
-            for doc in documents:
+            for doc in all_documents:
                 page = doc.metadata["page"]
                 page_counts[page] = page_counts.get(page, 0) + 1
             
-            logger.info(f"Chunks por página: {page_counts}")
+            logger.info(f"Chunks por página: {len(page_counts)} páginas procesadas")
             
-            return documents
+            return all_documents
             
         except Exception as e:
-            logger.error(f"Error creando documentos desde páginas: {str(e)}")
+            logger.error(f"Error creando documentos desde HTML: {str(e)}")
             raise
     
-    def process_pdf(self, pdf_path: str) -> tuple[list[Document], list[str]]:
-        """Procesar un archivo PDF completo"""
+    def _extract_page_title(self, html_content: str) -> str:
+        """Extraer título de la página HTML"""
         try:
-            # Extraer páginas manteniendo la información de página
-            pages = self.extract_pages_from_pdf(pdf_path)
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            title = soup.find('title')
+            return title.get_text().strip() if title else "Unknown Title"
+        except:
+            return "Unknown Title"
+    
+    async def process_think_python_website_async(self) -> tuple[list[Document], list[str]]:
+        """Procesar todo el sitio web de Think Python de forma asíncrona"""
+        try:
+            # Scrapear todas las páginas
+            logger.info("Iniciando scraping asíncrono de Think Python...")
+            html_pages = await self.web_scraper.scrape_all_chapters()
             
-            # Crear documentos procesando página por página
-            documents = self.create_documents_from_pages(pages, source=os.path.basename(pdf_path))
+            if not html_pages:
+                raise ValueError("No se pudieron scrapear páginas web")
+            
+            # Crear documentos con fragmentación semántica paralela simple
+            documents = await self.create_documents_from_html_pages_async(html_pages)
             
             # Generar IDs únicos para cada documento
             doc_ids = [str(uuid4()) for _ in documents]
@@ -110,5 +169,40 @@ class DocumentProcessor:
             return documents, doc_ids
             
         except Exception as e:
-            logger.error(f"Error procesando PDF: {str(e)}")
+            logger.error(f"Error procesando sitio web de Think Python: {str(e)}")
             raise
+        
+    async def process_all_websites_async(self) -> tuple[list[Document], list[str]]:
+        """Procesar Think Python y PEP-8 de forma simplificada"""
+        try:
+            # Scrapear todas las páginas (asíncrono)
+            logger.info("Iniciando scraping asíncrono de Think Python y PEP-8...")
+            html_pages = await self.web_scraper.scrape_all_content()
+            
+            if not html_pages:
+                raise ValueError("No se pudieron scrapear páginas web")
+            
+            # Crear documentos con fragmentación semántica paralela simple
+            documents = await self.create_documents_from_html_pages_async(html_pages)
+            
+            # Generar IDs únicos para cada documento
+            doc_ids = [str(uuid4()) for _ in documents]
+            
+            return documents, doc_ids
+            
+        except Exception as e:
+            logger.error(f"Error procesando sitios web: {str(e)}")
+            raise
+    
+    # Mantener métodos síncronos para compatibilidad
+    def create_documents_from_html_pages(self, html_pages: list) -> list[Document]:
+        """Wrapper síncrono para compatibilidad"""
+        return asyncio.run(self.create_documents_from_html_pages_async(html_pages))
+    
+    def process_think_python_website(self) -> tuple[list[Document], list[str]]:
+        """Wrapper síncrono para compatibilidad"""
+        return asyncio.run(self.process_think_python_website_async())
+        
+    def process_all_websites(self) -> tuple[list[Document], list[str]]:
+        """Wrapper síncrono para compatibilidad"""
+        return asyncio.run(self.process_all_websites_async())

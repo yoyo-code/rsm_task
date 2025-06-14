@@ -7,30 +7,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 class RAGService:
-    """Servicio principal para manejar las operaciones RAG con logging detallado"""
+    """Servicio principal para manejar las operaciones RAG con páginas web"""
     
     def __init__(self):
-        logger.info("Inicializando RAGService...")
+        logger.info("Inicializando RAGService para procesamiento web...")
         
         self.vector_store_manager = VectorStoreManager()
         self.document_processor = DocumentProcessor()
         self.agentic_rag = AgenticRAG(self.vector_store_manager)
         
-        logger.info("RAG Service inicializado correctamente")
+        logger.info("RAG Service inicializado correctamente para web scraping")
     
-    async def ingest_document(self, pdf_path: str) -> IngestResponse:
-        """Procesar e indexar documento en Qdrant con logging detallado"""
-        if not pdf_path:
-            raise ValueError("Se requiere un archivo PDF para la ingesta")
-        
-        logger.info(f"=== INICIANDO INGESTA ===")
-        logger.info(f"Archivo PDF: {pdf_path}")
+    async def ingest_think_python_website(self) -> IngestResponse:
+        """Procesar e indexar todo el sitio web de Think Python en Qdrant"""
+        logger.info(f"=== INICIANDO INGESTA WEB THINK PYTHON ===")
         
         try:
-            # Procesar PDF
-            logger.info("Paso 1: Procesando PDF...")
-            documents, doc_ids = self.document_processor.process_pdf(pdf_path)
-            logger.info(f"PDF procesado: {len(documents)} documentos creados")
+            # Procesar sitio web 
+            logger.info("Paso 1: Scrapeando y procesando sitio web...")
+            documents, doc_ids = await self.document_processor.process_all_websites_async()
+            logger.info(f"Sitio web procesado: {len(documents)} documentos creados")
             
             # Indexar en Qdrant
             logger.info("Paso 2: Indexando en Qdrant...")
@@ -47,27 +43,35 @@ class RAGService:
             
             # Prueba de búsqueda para verificar funcionamiento
             logger.info("Paso 5: Probando búsqueda...")
-            test_results = self.vector_store_manager.test_similarity_search("test", k=1)
+            test_results = self.vector_store_manager.test_similarity_search("Python variables", k=1)
             logger.info(f"Prueba de búsqueda: {len(test_results)} resultados")
             
+            # Contar páginas únicas procesadas
+            unique_pages = set()
+            for doc in documents:
+                unique_pages.add(doc.metadata.get('page', 'unknown'))
+            
             document_info = {
-                "source": pdf_path,
+                "source": "Think Python Website + PEP-8",
                 "total_chunks": len(documents),
+                "unique_pages": len(unique_pages),
                 "vector_store": "Qdrant",
                 "collection": self.vector_store_manager.collection_name,
-                "vectors_indexed": collection_info['vectors_count']
+                "vectors_indexed": collection_info['vectors_count'],
+                "base_urls": ["https://allendowney.github.io/ThinkPython/", "https://peps.python.org/pep-0008/"],
+                "fragmentation_type": "semantic"
             }
             
-            logger.info(f"=== INGESTA COMPLETADA EXITOSAMENTE ===")
+            logger.info(f"=== INGESTA WEB COMPLETADA EXITOSAMENTE ===")
             
             return IngestResponse(
                 status="success",
-                message="Documento procesado e indexado correctamente en Qdrant",
+                message=f"Sitio web Think Python y PEP-8 procesados e indexados correctamente. {len(unique_pages)} páginas, {len(documents)} chunks semánticos",
                 document_info=document_info
             )
             
         except Exception as e:
-            logger.error(f"=== ERROR EN INGESTA ===")
+            logger.error(f"=== ERROR EN INGESTA WEB ===")
             logger.error(f"Error: {str(e)}")
             raise
     
@@ -92,7 +96,7 @@ class RAGService:
             sources = []
             for source_data in result.get("sources", []):
                 sources.append(Source(
-                    page=source_data.get("page", 1),
+                    page=source_data.get("page", "unknown"),
                     text=source_data.get("text", "")
                 ))
             

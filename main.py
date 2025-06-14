@@ -1,20 +1,18 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from models import QueryRequest, QueryResponse, IngestResponse, HealthResponse
 from rag_service import RAGService
 from config import settings
 import logging
-import os
-import shutil
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="RAG Microservice con Qdrant",
-    description="Microservicio de Retrieval-Augmented Generation con Qdrant y patrón agentic",
-    version="2.0.0"
+    title="RAG Microservice con Think Python",
+    description="Microservicio de Retrieval-Augmented Generation que procesa el sitio web Think Python con fragmentación semántica y patrón agentic",
+    version="3.0.0"
 )
 
 # Configurar CORS
@@ -51,30 +49,19 @@ async def health_check():
         raise HTTPException(status_code=503, detail=f"Servicio no disponible: {str(e)}")
 
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest_document(file: UploadFile = File(...)):
-    """Endpoint para cargar y reindexar documentos"""
+async def ingest_think_python():
+    """Endpoint para scrapear e indexar el sitio web completo de Think Python y PEP-8 usando fragmentación semántica"""
     try:
-        logger.info("Iniciando proceso de ingesta")
+        logger.info("Iniciando proceso de ingesta del sitio web Think Python y PEP-8")
         
-        if not file.filename.endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Solo se permiten archivos PDF")
-        
-        # Guardar archivo subido
-        pdf_path = os.path.join(settings.upload_dir, file.filename)
-        with open(pdf_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        logger.info(f"Archivo guardado: {pdf_path}")
-        
-        # Procesar documento
-        result = await rag_service.ingest_document(pdf_path)
+        result = await rag_service.ingest_think_python_website()
         logger.info("Proceso de ingesta completado exitosamente")
         
         return result
         
     except Exception as e:
         logger.error(f"Error en ingesta: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error al procesar documento: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al procesar sitio web: {str(e)}")
 
 @app.post("/query", response_model=QueryResponse)
 async def query_document(request: QueryRequest):
@@ -101,6 +88,37 @@ async def get_collection_info():
         
     except Exception as e:
         logger.error(f"Error obteniendo info de colecciones: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.get("/pages/info")
+async def get_pages_info():
+    """Endpoint adicional para obtener información sobre las páginas indexadas"""
+    try:
+        collection_info = rag_service.vector_store_manager.get_collection_info()
+        
+        if collection_info['vectors_count'] > 0:
+            # Hacer una búsqueda de prueba para obtener muestra de metadatos
+            test_results = rag_service.vector_store_manager.test_similarity_search("Python", k=5)
+            
+            unique_pages = set()
+            for doc in test_results:
+                unique_pages.add(doc.metadata.get('page', 'unknown'))
+            
+            return {
+                "total_vectors": collection_info['vectors_count'],
+                "sample_pages": list(unique_pages),
+                "base_url": "https://allendowney.github.io/ThinkPython/",
+                "fragmentation_type": "semantic"
+            }
+        else:
+            return {
+                "total_vectors": 0,
+                "sample_pages": [],
+                "message": "No hay páginas indexadas"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo info de páginas: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 if __name__ == "__main__":

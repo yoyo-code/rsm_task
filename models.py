@@ -7,7 +7,7 @@ class QueryRequest(BaseModel):
 
 class Source(BaseModel):
     """Modelo para las fuentes de información"""
-    page: int = Field(..., description="Número de página")
+    page: str = Field(..., description="Identificador de página (URL o número)")
     text: str = Field(..., description="Texto del pasaje relevante")
 
 class QueryResponse(BaseModel):

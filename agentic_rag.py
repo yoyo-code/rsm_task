@@ -34,7 +34,7 @@ def custom_retriever_function(vector_store_manager):
         """Recuperar documentos y formatear con metadatos"""
         try:
             # Obtener retriever base
-            retriever = vector_store_manager.get_retriever(k=4)
+            retriever = vector_store_manager.get_retriever(k=5)
             # Recuperar documentos con metadatos
             documents = retriever.invoke(query)
             # Formatear respuesta incluyendo metadatos
@@ -55,9 +55,7 @@ def setup_retriever_tool(vector_store_manager):
     """Configurar herramienta de recuperación personalizada"""
     global retriever_tool
     try:
-        # Crear función retriever personalizada
         custom_retriever = custom_retriever_function(vector_store_manager)
-        # Crear tool con función personalizada
         from langchain_core.tools import tool
         @tool
         def retrieve_document_content(query: str) -> str:
@@ -88,11 +86,16 @@ REWRITE_PROMPT = (
 )
 
 GENERATE_PROMPT = (
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer the question. "
-    "If you don't know the answer, just say that you don't know. "
-    "Use three sentences maximum and keep the answer concise.\n"
-    "Question: {question} \n"
+    "You are an assistant for question-answering tasks with access to comprehensive Python programming resources. "
+    "You have access to:\n"
+    "- Think Python: A complete Python programming book covering fundamentals, data structures, algorithms, and programming concepts\n"
+    "- PEP-8: The official Python style guide with coding conventions and best practices\n"
+    "- Code examples, explanations, and programming concepts from beginner to advanced levels\n\n"
+    "Use the following retrieved context to answer the question. "
+    "You can provide code examples, explain programming concepts, discuss Python syntax, or give style recommendations based on the available content. "
+    "If the information needed to answer the question is not in the provided context, clearly state that you don't know. "
+    "Use three sentences maximum and keep the answer concise.\n\n"
+    "Question: {question}\n"
     "Context: {context}"
 )
 
@@ -212,12 +215,12 @@ def extract_sources_from_formatted_content(content: str) -> list:
         # Buscar bloques de documentos con patrón [DOCUMENTO_X|PAGE_Y|SOURCE_Z|CHUNK_W]
         document_pattern = r'\[DOCUMENTO_(\d+)\|PAGE_([^|]+)\|SOURCE_([^|]+)\|CHUNK_([^]]+)\]\n(.*?)(?=\[DOCUMENTO_|\Z)'
         matches = re.findall(document_pattern, content, re.DOTALL)
-        for match in matches[:3]:  # Limitar a 3 fuentes
+        for match in matches[:5]:
             doc_num, page_info, source_info, chunk_info, doc_content = match
             clean_content = doc_content.strip()
             source = {
                 "page": str(page_info),  
-                "text": clean_content[:200] + "..." if len(clean_content) > 200 else clean_content
+                "text": clean_content  
             }
             sources.append(source)
         if not sources:
@@ -235,16 +238,16 @@ def extract_sources_fallback(content: str) -> list:
         paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
         if not paragraphs:
             paragraphs = [p.strip() for p in content.split('\n') if p.strip()]
-        for i, paragraph in enumerate(paragraphs[:3]):
+        for i, paragraph in enumerate(paragraphs[:5]):
             if len(paragraph) > 20: 
                 sources.append({
                     "page": str(i + 1),  
-                    "text": paragraph[:200] + "..." if len(paragraph) > 200 else paragraph
+                    "text": paragraph 
                 })
         if not sources and content.strip():
             sources.append({
                 "page": "1",  
-                "text": content[:200] + "..." if len(content) > 200 else content
+                "text": content 
             })
         return sources
     except Exception as e:
